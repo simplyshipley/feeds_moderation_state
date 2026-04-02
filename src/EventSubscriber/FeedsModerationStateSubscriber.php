@@ -46,6 +46,11 @@ class FeedsModerationStateSubscriber implements EventSubscriberInterface {
   /**
    * Forces a moderation state on the entity before Feeds saves it.
    *
+   * Reads the raw parsed item to determine publish status. The entity's
+   * status field is NOT used because Feeds has no mapping for it — the
+   * entity status is never updated by Feeds, so reading it would always
+   * reflect the entity's current persisted state, not the source value.
+   *
    * @param \Drupal\feeds\Event\EntityEvent $event
    *   The entity event.
    */
@@ -67,10 +72,11 @@ class FeedsModerationStateSubscriber implements EventSubscriberInterface {
     }
 
     // Only force the moderation state when the source item is unpublished.
-    // After Feeds map() runs, $entity->get('status')->value reflects the
-    // source data. If the source is published (status = 1), leave the
-    // moderation state untouched so Feeds' own field mapping governs it.
-    if ((int) $entity->get('status')->value === 1) {
+    // Read status from the raw parsed item rather than the entity, because
+    // Feeds has no field mapping for status — the entity field is never
+    // updated by Feeds and would reflect the previously saved value instead.
+    $item_status = $event->getItem()->get('status');
+    if ($item_status === NULL || (int) $item_status !== 0) {
       return;
     }
 

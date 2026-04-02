@@ -19,8 +19,10 @@ use Symfony\Component\EventDispatcher\EventSubscriberInterface;
  * Sets a configured content moderation state on entities imported via Feeds.
  *
  * Subscribes to PROCESS_ENTITY_PRESAVE so the moderation state is applied
- * before Feeds saves the entity. Primary use case: forcing existing published
- * nodes back to an unpublished state when re-imported via Feeds.
+ * before Feeds saves the entity. Only acts on existing entities being updated
+ * — new entities are skipped so that initial-import defaults are not
+ * overridden. Primary use case: forcing existing published nodes back to an
+ * unpublished state when re-imported via Feeds.
  */
 class FeedsModerationStateSubscriber implements EventSubscriberInterface {
 
@@ -64,6 +66,10 @@ class FeedsModerationStateSubscriber implements EventSubscriberInterface {
     $entity = $event->getEntity();
 
     if (!$entity instanceof ContentEntityInterface) {
+      return;
+    }
+
+    if ($entity->isNew()) {
       return;
     }
 

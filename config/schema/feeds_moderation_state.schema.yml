@@ -1,0 +1,18 @@
+# Schema for feeds_moderation_state third_party_settings stored on FeedType.
+#
+# Settings are stored under:
+#   feeds_feed_type.*.third_party.feeds_moderation_state
+
+feeds_feed_type.third_party.feeds_moderation_state:
+  type: mapping
+  label: 'Feeds Moderation State settings'
+  mapping:
+    enabled:
+      type: boolean
+      label: 'Enable moderation state override'
+    moderation_state:
+      type: string
+      label: 'Target moderation state'
+    bypass_transitions:
+      type: boolean
+      label: 'Bypass workflow transitions (setSyncing)'

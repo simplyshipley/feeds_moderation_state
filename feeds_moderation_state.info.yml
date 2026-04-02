@@ -1,0 +1,9 @@
+name: Feeds Moderation State
+type: module
+description: Forces a configured content moderation state on entities imported via Feeds. Supports Drupal 10 and 11.
+package: Custom
+core_version_requirement: ^10 || ^11
+dependencies:
+  - drupal:content_moderation
+  - drupal:workflows
+  - feeds:feeds

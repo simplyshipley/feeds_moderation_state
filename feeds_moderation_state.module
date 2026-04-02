@@ -1,0 +1,145 @@
+<?php
+
+/**
+ * @file
+ * Hooks for the Feeds Moderation State module.
+ *
+ * Adds per-FeedType configuration for forcing a content moderation state on
+ * all entities imported by that feed. Settings are stored as third-party
+ * settings on the FeedType config entity under the key
+ * 'feeds_moderation_state'.
+ */
+
+declare(strict_types=1);
+
+use Drupal\Core\Form\FormStateInterface;
+use Drupal\workflows\Entity\Workflow;
+
+/**
+ * Implements hook_form_feeds_feed_type_form_alter().
+ *
+ * Adds a "Content moderation state" fieldset to the FeedType edit form so
+ * that site builders can configure a forced moderation state for entities
+ * imported by this feed.
+ */
+function feeds_moderation_state_form_feeds_feed_type_form_alter(array &$form, FormStateInterface $form_state): void {
+  /** @var \Drupal\feeds\Entity\FeedType $feed_type */
+  $feed_type = $form_state->getFormObject()->getEntity();
+
+  $settings = $feed_type->getThirdPartySettings('feeds_moderation_state') + [
+    'enabled' => FALSE,
+    'moderation_state' => '',
+    'bypass_transitions' => FALSE,
+  ];
+
+  $form['feeds_moderation_state'] = [
+    '#type' => 'details',
+    '#title' => t('Content moderation state'),
+    '#open' => !empty($settings['enabled']),
+    '#group' => 'advanced',
+    '#tree' => TRUE,
+  ];
+
+  $form['feeds_moderation_state']['enabled'] = [
+    '#type' => 'checkbox',
+    '#title' => t('Force a moderation state on imported entities'),
+    '#description' => t('When enabled, every entity created or updated by this feed will be forced into the selected moderation state.'),
+    '#default_value' => $settings['enabled'],
+  ];
+
+  $form['feeds_moderation_state']['moderation_state'] = [
+    '#type' => 'select',
+    '#title' => t('Target moderation state'),
+    '#description' => t('Only unpublished states are listed. Published states must be reached via normal workflow transitions.'),
+    '#options' => _feeds_moderation_state_get_state_options(),
+    '#empty_option' => t('- Select a state -'),
+    '#default_value' => $settings['moderation_state'],
+    '#states' => [
+      'visible' => [
+        ':input[name="feeds_moderation_state[enabled]"]' => ['checked' => TRUE],
+      ],
+      'required' => [
+        ':input[name="feeds_moderation_state[enabled]"]' => ['checked' => TRUE],
+      ],
+    ],
+  ];
+
+  $form['feeds_moderation_state']['bypass_transitions'] = [
+    '#type' => 'checkbox',
+    '#title' => t('Bypass workflow transition validation (setSyncing)'),
+    '#description' => t('Calls setSyncing(TRUE) on the entity before save, bypassing transition validation. Use only for migration or data-sync scenarios.'),
+    '#default_value' => $settings['bypass_transitions'],
+    '#states' => [
+      'visible' => [
+        ':input[name="feeds_moderation_state[enabled]"]' => ['checked' => TRUE],
+      ],
+    ],
+  ];
+
+  // Prepend our submit handler so settings are written before the entity save.
+  array_unshift($form['actions']['submit']['#submit'], 'feeds_moderation_state_feed_type_form_submit');
+}
+
+/**
+ * Submit handler for the FeedType form.
+ *
+ * Persists the moderation state configuration as third-party settings on the
+ * FeedType config entity.
+ */
+function feeds_moderation_state_feed_type_form_submit(array &$form, FormStateInterface $form_state): void {
+  /** @var \Drupal\feeds\Entity\FeedType $feed_type */
+  $feed_type = $form_state->getFormObject()->getEntity();
+  $values = $form_state->getValue('feeds_moderation_state', []);
+
+  $enabled = !empty($values['enabled']);
+  $moderation_state = $enabled ? ($values['moderation_state'] ?? '') : '';
+  $bypass_transitions = $enabled && !empty($values['bypass_transitions']);
+
+  $feed_type->setThirdPartySetting('feeds_moderation_state', 'enabled', $enabled);
+  $feed_type->setThirdPartySetting('feeds_moderation_state', 'moderation_state', $moderation_state);
+  $feed_type->setThirdPartySetting('feeds_moderation_state', 'bypass_transitions', $bypass_transitions);
+}
+
+/**
+ * Returns a flat or grouped option list of unpublished moderation states.
+ *
+ * Loads all workflows using the content_moderation plugin and collects states
+ * where isPublishedState() is FALSE. Results are grouped by workflow label
+ * when more than one workflow is present.
+ *
+ * @return array<string, string|array<string, string>>
+ *   Options array suitable for a Form API #options element. Single-workflow
+ *   sites get a flat list; multi-workflow sites get optgroups keyed by
+ *   workflow label.
+ */
+function _feeds_moderation_state_get_state_options(): array {
+  $options = [];
+
+  /** @var \Drupal\workflows\Entity\Workflow[] $workflows */
+  $workflows = Workflow::loadMultiple();
+  foreach ($workflows as $workflow) {
+    if ($workflow->get('type') !== 'content_moderation') {
+      continue;
+    }
+
+    $group = [];
+    foreach ($workflow->getTypePlugin()->getStates() as $state_id => $state) {
+      // Skip published states — those must be reached via transitions.
+      if ($state->isPublishedState()) {
+        continue;
+      }
+      $group[$state_id] = $state->label();
+    }
+
+    if (!empty($group)) {
+      $options[$workflow->label()] = $group;
+    }
+  }
+
+  // Flatten to a simple list when only one workflow exists.
+  if (count($options) === 1) {
+    $options = reset($options);
+  }
+
+  return $options;
+}

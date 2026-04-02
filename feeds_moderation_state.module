@@ -36,7 +36,7 @@ function feeds_moderation_state_form_feeds_feed_type_form_alter(array &$form, Fo
     '#type' => 'details',
     '#title' => t('Content moderation state'),
     '#open' => !empty($settings['enabled']),
-    '#group' => 'advanced',
+    '#group' => 'plugin_settings',
     '#tree' => TRUE,
   ];
 

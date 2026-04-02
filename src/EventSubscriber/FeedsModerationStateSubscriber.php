@@ -66,6 +66,14 @@ class FeedsModerationStateSubscriber implements EventSubscriberInterface {
       return;
     }
 
+    // Only force the moderation state when the source item is unpublished.
+    // After Feeds map() runs, $entity->get('status')->value reflects the
+    // source data. If the source is published (status = 1), leave the
+    // moderation state untouched so Feeds' own field mapping governs it.
+    if ((int) $entity->get('status')->value === 1) {
+      return;
+    }
+
     if (!empty($settings['bypass_transitions'])) {
       $entity->setSyncing(TRUE);
     }

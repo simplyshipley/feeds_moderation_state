@@ -16,3 +16,15 @@ feeds_feed_type.third_party.feeds_moderation_state:
     bypass_transitions:
       type: boolean
       label: 'Bypass workflow transitions (setSyncing)'
+    source_unpublished_value:
+      type: string
+      label: 'Source field value that indicates unpublished'
+    publish_enabled:
+      type: boolean
+      label: 'Enable publishing existing entities when source status changes to published'
+    publish_moderation_state:
+      type: string
+      label: 'Target moderation state when publishing'
+    source_published_value:
+      type: string
+      label: 'Source field value that indicates published'

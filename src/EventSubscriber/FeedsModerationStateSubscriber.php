@@ -21,8 +21,9 @@ use Symfony\Component\EventDispatcher\EventSubscriberInterface;
  * Subscribes to PROCESS_ENTITY_PRESAVE so the moderation state is applied
  * before Feeds saves the entity. Only acts on existing entities being updated
  * — new entities are skipped so that initial-import defaults are not
- * overridden. Primary use case: forcing existing published nodes back to an
- * unpublished state when re-imported via Feeds.
+ * overridden. Supports bidirectional sync: transitions entities to an
+ * unpublished state when the source signals unpublished, and to a published
+ * state when the source signals published.
  */
 class FeedsModerationStateSubscriber implements EventSubscriberInterface {
 
@@ -53,13 +54,21 @@ class FeedsModerationStateSubscriber implements EventSubscriberInterface {
    * entity status is never updated by Feeds, so reading it would always
    * reflect the entity's current persisted state, not the source value.
    *
+   * Supports bidirectional sync: transitions to an unpublished state when the
+   * source signals unpublished, and to a published state when the source
+   * signals published. The two directions are evaluated in order; the first
+   * match wins.
+   *
    * @param \Drupal\feeds\Event\EntityEvent $event
    *   The entity event.
    */
   public function onProcessEntityPresave(EntityEvent $event): void {
     $settings = $event->getFeed()->getType()->getThirdPartySettings('feeds_moderation_state');
 
-    if (empty($settings['enabled']) || empty($settings['moderation_state'])) {
+    $unpublish_enabled = !empty($settings['enabled']) && !empty($settings['moderation_state']);
+    $publish_enabled = !empty($settings['publish_enabled']) && !empty($settings['publish_moderation_state']);
+
+    if (!$unpublish_enabled && !$publish_enabled) {
       return;
     }
 
@@ -77,12 +86,31 @@ class FeedsModerationStateSubscriber implements EventSubscriberInterface {
       return;
     }
 
-    // Only force the moderation state when the source item is unpublished.
-    // Read status from the raw parsed item rather than the entity, because
-    // Feeds has no field mapping for status — the entity field is never
-    // updated by Feeds and would reflect the previously saved value instead.
+    // Read status from the raw parsed item (after feeds_tamper transforms, if
+    // any). Compare as strings — PHP's (int) cast silently converts any
+    // non-numeric string to 0, which would cause all entities to match.
     $item_status = $event->getItem()->get('status');
-    if ($item_status === NULL || (int) $item_status !== 0) {
+    if ($item_status === NULL) {
+      return;
+    }
+
+    $target_state = NULL;
+
+    if ($unpublish_enabled) {
+      $unpublished_value = $settings['source_unpublished_value'] ?? '0';
+      if ((string) $item_status === (string) $unpublished_value) {
+        $target_state = $settings['moderation_state'];
+      }
+    }
+
+    if ($target_state === NULL && $publish_enabled) {
+      $published_value = $settings['source_published_value'] ?? '1';
+      if ((string) $item_status === (string) $published_value) {
+        $target_state = $settings['publish_moderation_state'];
+      }
+    }
+
+    if ($target_state === NULL) {
       return;
     }
 
@@ -90,7 +118,7 @@ class FeedsModerationStateSubscriber implements EventSubscriberInterface {
       $entity->setSyncing(TRUE);
     }
 
-    $entity->set('moderation_state', $settings['moderation_state']);
+    $entity->set('moderation_state', $target_state);
   }
 
 }

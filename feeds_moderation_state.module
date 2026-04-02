@@ -42,8 +42,8 @@ function feeds_moderation_state_form_feeds_feed_type_form_alter(array &$form, Fo
 
   $form['feeds_moderation_state']['enabled'] = [
     '#type' => 'checkbox',
-    '#title' => t('Force a moderation state on imported entities'),
-    '#description' => t('When enabled, every entity created or updated by this feed will be forced into the selected moderation state.'),
+    '#title' => t('Update moderation state on <strong>existing</strong> entities when publishing status changes on source'),
+    '#description' => t('When enabled, existing entities whose source record has <code>status = 0</code> will be transitioned to the selected moderation state. New entities and records with any other status value are not affected.'),
     '#default_value' => $settings['enabled'],
   ];
 

@@ -50,8 +50,15 @@ function feeds_moderation_state_feeds_targets_alter(array &$targets, \Drupal\fee
  * been removed and that state transitions are managed by this module.
  */
 function feeds_moderation_state_form_feeds_mapping_form_alter(array &$form, FormStateInterface $form_state): void {
-  /** @var \Drupal\feeds\Entity\FeedType $feed_type */
-  $feed_type = $form_state->getFormObject()->getEntity();
+  // MappingForm is not an EntityForm — the feed type is passed as a buildForm()
+  // route argument and stored in build info args, not via getEntity().
+  $args = $form_state->getBuildInfo()['args'] ?? [];
+  /** @var \Drupal\feeds\FeedTypeInterface|null $feed_type */
+  $feed_type = $args[0] ?? NULL;
+
+  if (!$feed_type instanceof \Drupal\feeds\FeedTypeInterface) {
+    return;
+  }
   $settings = $feed_type->getThirdPartySettings('feeds_moderation_state');
 
   if (empty($settings['enabled'])) {

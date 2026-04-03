@@ -17,7 +17,6 @@ declare(strict_types=1);
 use Drupal\Core\Form\FormStateInterface;
 use Drupal\Core\Routing\RouteMatchInterface;
 use Drupal\Core\StringTranslation\TranslatableMarkup;
-use Drupal\workflows\Entity\Workflow;
 
 /**
  * Implements hook_feeds_targets_alter().
@@ -50,11 +49,10 @@ function feeds_moderation_state_feeds_targets_alter(array &$targets, \Drupal\fee
  * been removed and that state transitions are managed by this module.
  */
 function feeds_moderation_state_form_feeds_mapping_form_alter(array &$form, FormStateInterface $form_state): void {
-  // MappingForm is not an EntityForm — the feed type is passed as a buildForm()
-  // route argument and stored in build info args, not via getEntity().
-  $args = $form_state->getBuildInfo()['args'] ?? [];
+  // MappingForm is not an EntityForm — the feed type is a named route parameter,
+  // not available via getEntity(). Use routeMatch for the named parameter.
   /** @var \Drupal\feeds\FeedTypeInterface|null $feed_type */
-  $feed_type = $args[0] ?? NULL;
+  $feed_type = \Drupal::routeMatch()->getParameter('feeds_feed_type');
 
   if (!$feed_type instanceof \Drupal\feeds\FeedTypeInterface) {
     return;
@@ -107,24 +105,21 @@ function feeds_moderation_state_feeds_feed_type_presave(\Drupal\feeds\Entity\Fee
 
   $mappings = $feed_type->getMappings();
   $has_passthrough = FALSE;
-  $changed = FALSE;
+  $has_direct = FALSE;
 
-  // Remove any direct moderation_state mapping.
-  $filtered = array_values(array_filter($mappings, static function (array $m) use (&$has_passthrough, &$changed): bool {
-    $target = $m['target'] ?? '';
+  foreach ($mappings as $mapping) {
+    $target = $mapping['target'] ?? '';
     if ($target === 'feeds_moderation_state_status') {
       $has_passthrough = TRUE;
     }
     if ($target === 'moderation_state') {
-      $changed = TRUE;
-      return FALSE;
+      $has_direct = TRUE;
     }
-    return TRUE;
-  }));
+  }
 
-  if ($changed) {
-    $feed_type->setMappings($filtered);
-    $mappings = $filtered;
+  // Remove any direct moderation_state mapping.
+  if ($has_direct) {
+    $feed_type->setMappings(_feeds_moderation_state_remove_target_mapping($mappings, 'moderation_state'));
   }
 
   // Ensure the passthrough mapping is present for hash tracking.
@@ -381,9 +376,7 @@ function feeds_moderation_state_feed_type_form_submit(array &$form, FormStateInt
   if ($enabled) {
     // Strip any direct moderation_state mapping — this module owns that now.
     if ($has_direct) {
-      $mappings = array_values(array_filter($mappings, static function (array $m): bool {
-        return ($m['target'] ?? '') !== 'moderation_state';
-      }));
+      $mappings = _feeds_moderation_state_remove_target_mapping($mappings, 'moderation_state');
       $feed_type->setMappings($mappings);
       \Drupal::messenger()->addStatus(t(
         'The direct <em>moderation_state</em> mapping has been removed from this feed type. ' .
@@ -403,11 +396,25 @@ function feeds_moderation_state_feed_type_form_submit(array &$form, FormStateInt
   }
   elseif (!$enabled && $has_passthrough) {
     // Module disabled on this feed type — remove the passthrough mapping.
-    $mappings = array_values(array_filter($mappings, static function (array $m): bool {
-      return ($m['target'] ?? '') !== 'feeds_moderation_state_status';
-    }));
-    $feed_type->setMappings($mappings);
+    $feed_type->setMappings(_feeds_moderation_state_remove_target_mapping($mappings, 'feeds_moderation_state_status'));
   }
+}
+
+/**
+ * Removes all mappings with the given target ID from a mappings array.
+ *
+ * @param array[] $mappings
+ *   The mappings array from FeedType::getMappings().
+ * @param string $target
+ *   The target ID to remove.
+ *
+ * @return array[]
+ *   The filtered mappings array, re-indexed.
+ */
+function _feeds_moderation_state_remove_target_mapping(array $mappings, string $target): array {
+  return array_values(array_filter($mappings, static function (array $m) use ($target): bool {
+    return ($m['target'] ?? '') !== $target;
+  }));
 }
 
 /**
@@ -430,9 +437,9 @@ function _feeds_moderation_state_get_state_options(bool $published = FALSE): arr
   $options = [];
 
   /** @var \Drupal\workflows\Entity\Workflow[] $workflows */
-  $workflows = Workflow::loadMultiple();
+  $workflows = \Drupal::entityTypeManager()->getStorage('workflow')->loadMultiple();
   foreach ($workflows as $workflow) {
-    if ($workflow->get('type') !== 'content_moderation') {
+    if ($workflow->getTypePlugin()->getPluginId() !== 'content_moderation') {
       continue;
     }
 
@@ -469,11 +476,11 @@ function _feeds_moderation_state_get_state_options(bool $published = FALSE): arr
  */
 function _feeds_moderation_state_get_default_published_state(): string {
   /** @var \Drupal\workflows\Entity\Workflow[] $workflows */
-  $workflows = Workflow::loadMultiple();
+  $workflows = \Drupal::entityTypeManager()->getStorage('workflow')->loadMultiple();
   $first = '';
 
   foreach ($workflows as $workflow) {
-    if ($workflow->get('type') !== 'content_moderation') {
+    if ($workflow->getTypePlugin()->getPluginId() !== 'content_moderation') {
       continue;
     }
 

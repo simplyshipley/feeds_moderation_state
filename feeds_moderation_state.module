@@ -199,6 +199,33 @@ function feeds_moderation_state_feed_type_form_submit(array &$form, FormStateInt
   $feed_type->setThirdPartySetting('feeds_moderation_state', 'publish_enabled', $publish_enabled);
   $feed_type->setThirdPartySetting('feeds_moderation_state', 'publish_moderation_state', $publish_moderation_state);
   $feed_type->setThirdPartySetting('feeds_moderation_state', 'source_published_value', $source_published_value);
+
+  // Ensure the source 'status' field participates in the Feeds item hash by
+  // keeping a mapping to our passthrough target. Feeds only hashes mapped
+  // source fields; without this mapping, status-only changes are invisible and
+  // PROCESS_ENTITY_PRESAVE never fires for them.
+  $mappings = $feed_type->getMappings();
+  $has_mapping = FALSE;
+  foreach ($mappings as $mapping) {
+    if (($mapping['target'] ?? '') === 'feeds_moderation_state_status') {
+      $has_mapping = TRUE;
+      break;
+    }
+  }
+  if ($enabled && !$has_mapping) {
+    $feed_type->addMapping([
+      'target' => 'feeds_moderation_state_status',
+      'map' => ['value' => 'status'],
+      'settings' => [],
+      'unique' => [],
+    ]);
+  }
+  elseif (!$enabled && $has_mapping) {
+    $mappings = array_values(array_filter($mappings, static function (array $m): bool {
+      return ($m['target'] ?? '') !== 'feeds_moderation_state_status';
+    }));
+    $feed_type->setMappings($mappings);
+  }
 }
 
 /**

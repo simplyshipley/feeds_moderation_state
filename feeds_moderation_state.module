@@ -68,7 +68,8 @@ function feeds_moderation_state_form_feeds_mapping_form_alter(array &$form, Form
         'The <em>moderation_state</em> field is not available as a mapping target — ' .
         'moderation state transitions are managed automatically by this module based ' .
         'on the source status value. Configure the target state under ' .
-        '<em>Plugin settings &gt; Content moderation state</em> on the feed type edit form.'
+        '<em>Content moderation state</em> on the <a href=":url">feed type settings page</a>.',
+        [':url' => $feed_type->toUrl('edit-form')->toString()]
       ),
     ],
   ];

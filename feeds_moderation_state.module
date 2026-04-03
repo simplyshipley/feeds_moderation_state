@@ -15,7 +15,44 @@
 declare(strict_types=1);
 
 use Drupal\Core\Form\FormStateInterface;
+use Drupal\Core\Routing\RouteMatchInterface;
+use Drupal\Core\StringTranslation\TranslatableMarkup;
 use Drupal\workflows\Entity\Workflow;
+
+/**
+ * Implements hook_help().
+ */
+function feeds_moderation_state_help(string $route_name, RouteMatchInterface $route_match): string|TranslatableMarkup {
+  if ($route_name !== 'help.page.feeds_moderation_state') {
+    return '';
+  }
+
+  $output = '';
+  $output .= '<h2>' . t('About') . '</h2>';
+  $output .= '<p>' . t('Forces a configured Content Moderation state on entities imported via Feeds 3.x. Supports bidirectional sync — transitions to an unpublished state when the source signals unpublished, and back to a published state when the source signals published.') . '</p>';
+  $output .= '<p>' . t('Only existing entities being updated are affected. New entities created during the initial import use whatever default moderation state the workflow assigns to new content.') . '</p>';
+
+  $output .= '<h2>' . t('Entity type requirements') . '</h2>';
+  $output .= '<p>' . t('The entity type must be revisionable and a Content Moderation workflow must be applied to the specific bundle being imported. Taxonomy terms are not revisionable by default and cannot use Content Moderation without additional modules.') . '</p>';
+
+  $output .= '<h2>' . t('Configuration') . '</h2>';
+  $output .= '<p>' . t('All settings are per-FeedType. Edit a feed type at <em>Structure &gt; Feed types</em> and expand the <em>Content moderation state</em> fieldset.') . '</p>';
+  $output .= '<ol>';
+  $output .= '<li>' . t('Check <em>Update moderation state on existing entities when publishing status changes on source</em>.') . '</li>';
+  $output .= '<li>' . t('Select the <em>Target moderation state</em> — the state to apply when the source signals unpublished (e.g. <em>draft</em>, <em>archived</em>). Only unpublished states are listed.') . '</li>';
+  $output .= '<li>' . t('Set the <em>Unpublished indicator value</em> — the raw source value that means "unpublished". Use <code>0</code> for standard API responses. If <a href=":tamper">Feeds Tamper</a> transforms the status field before it reaches this module (e.g. <code>0</code> &rarr; <em>draft</em>), enter the post-tamper value instead.', [':tamper' => 'https://www.drupal.org/project/feeds_tamper']) . '</li>';
+  $output .= '<li>' . t('Optionally enable the <em>Publish direction</em> to also transition entities back to a published state when the source signals published.') . '</li>';
+  $output .= '<li>' . t('Save the feed type. The module automatically adds an internal <em>Moderation status tracker</em> mapping so that status-only source changes are detected. You do not need to add this mapping manually.') . '</li>';
+  $output .= '</ol>';
+
+  $output .= '<h2>' . t('Do not map directly to moderation_state') . '</h2>';
+  $output .= '<p>' . t('Do not add a Feeds field mapping that targets <code>moderation_state</code> directly. Drupal\'s <code>moderation_state</code> is a computed virtual field managed by Content Moderation, not a writable Feeds target. This module sets it internally on the entity during <code>PROCESS_ENTITY_PRESAVE</code>, after reading the source status value.') . '</p>';
+
+  $output .= '<h2>' . t('Bypass workflow transitions') . '</h2>';
+  $output .= '<p>' . t('Checking <em>Bypass workflow transition validation (setSyncing)</em> calls <code>setSyncing(TRUE)</code> on the entity before save, allowing it to jump directly to any state regardless of allowed transitions. Use only for data migration or sync scenarios.') . '</p>';
+
+  return $output;
+}
 
 /**
  * Implements hook_form_feeds_feed_type_form_alter().

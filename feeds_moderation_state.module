@@ -20,6 +20,118 @@ use Drupal\Core\StringTranslation\TranslatableMarkup;
 use Drupal\workflows\Entity\Workflow;
 
 /**
+ * Implements hook_feeds_targets_alter().
+ *
+ * Removes the 'moderation_state' target from the Feeds mapping UI when this
+ * module is enabled on the feed type. This prevents administrators from
+ * re-adding a direct moderation_state mapping that would conflict with the
+ * module's PROCESS_ENTITY_PRESAVE transition logic.
+ *
+ * @param array<string, \Drupal\feeds\TargetDefinitionInterface> $targets
+ *   Available mapping targets, keyed by target ID.
+ * @param \Drupal\feeds\FeedTypeInterface $feed_type
+ *   The feed type whose mapping targets are being built.
+ */
+function feeds_moderation_state_feeds_targets_alter(array &$targets, \Drupal\feeds\FeedTypeInterface $feed_type): void {
+  $settings = $feed_type->getThirdPartySettings('feeds_moderation_state');
+
+  if (empty($settings['enabled'])) {
+    return;
+  }
+
+  unset($targets['moderation_state']);
+}
+
+/**
+ * Implements hook_form_FORM_ID_alter() for feeds_mapping_form.
+ *
+ * Adds an informational notice to the Feeds mapping page when this module is
+ * enabled on the feed type, explaining that the moderation_state target has
+ * been removed and that state transitions are managed by this module.
+ */
+function feeds_moderation_state_form_feeds_mapping_form_alter(array &$form, FormStateInterface $form_state): void {
+  /** @var \Drupal\feeds\Entity\FeedType $feed_type */
+  $feed_type = $form_state->getFormObject()->getEntity();
+  $settings = $feed_type->getThirdPartySettings('feeds_moderation_state');
+
+  if (empty($settings['enabled'])) {
+    return;
+  }
+
+  $form['feeds_moderation_state_notice'] = [
+    '#type' => 'container',
+    '#attributes' => ['class' => ['messages', 'messages--status']],
+    '#weight' => -100,
+    'message' => [
+      '#markup' => t(
+        '<strong>Feeds Moderation State is active on this feed type.</strong> ' .
+        'The <em>moderation_state</em> field is not available as a mapping target — ' .
+        'moderation state transitions are managed automatically by this module based ' .
+        'on the source status value. Configure the target state under ' .
+        '<em>Plugin settings &gt; Content moderation state</em> on the feed type edit form.'
+      ),
+    ],
+  ];
+}
+
+/**
+ * Implements hook_feeds_feed_type_presave().
+ *
+ * Fires whenever a FeedType config entity is saved — including config import,
+ * programmatic saves, and form saves. Ensures that any direct mapping to the
+ * 'moderation_state' target is removed and the passthrough
+ * 'feeds_moderation_state_status' mapping is present whenever this module is
+ * enabled on the feed type.
+ *
+ * This covers the config import path where the form submit handler does not
+ * run. The form submit handler handles the same cleanup for interactive saves
+ * and shows an admin messenger notice; this hook provides silent structural
+ * enforcement for all other save paths.
+ *
+ * @param \Drupal\feeds\Entity\FeedType $feed_type
+ *   The feed type being saved.
+ */
+function feeds_moderation_state_feeds_feed_type_presave(\Drupal\feeds\Entity\FeedType $feed_type): void {
+  $settings = $feed_type->getThirdPartySettings('feeds_moderation_state');
+
+  if (empty($settings['enabled'])) {
+    return;
+  }
+
+  $mappings = $feed_type->getMappings();
+  $has_passthrough = FALSE;
+  $changed = FALSE;
+
+  // Remove any direct moderation_state mapping.
+  $filtered = array_values(array_filter($mappings, static function (array $m) use (&$has_passthrough, &$changed): bool {
+    $target = $m['target'] ?? '';
+    if ($target === 'feeds_moderation_state_status') {
+      $has_passthrough = TRUE;
+    }
+    if ($target === 'moderation_state') {
+      $changed = TRUE;
+      return FALSE;
+    }
+    return TRUE;
+  }));
+
+  if ($changed) {
+    $feed_type->setMappings($filtered);
+    $mappings = $filtered;
+  }
+
+  // Ensure the passthrough mapping is present for hash tracking.
+  if (!$has_passthrough) {
+    $feed_type->addMapping([
+      'target' => 'feeds_moderation_state_status',
+      'map' => ['value' => 'status'],
+      'settings' => [],
+      'unique' => [],
+    ]);
+  }
+}
+
+/**
  * Implements hook_help().
  */
 function feeds_moderation_state_help(string $route_name, RouteMatchInterface $route_match): string|TranslatableMarkup {
@@ -241,23 +353,49 @@ function feeds_moderation_state_feed_type_form_submit(array &$form, FormStateInt
   // keeping a mapping to our passthrough target. Feeds only hashes mapped
   // source fields; without this mapping, status-only changes are invisible and
   // PROCESS_ENTITY_PRESAVE never fires for them.
+  //
+  // When enabling: also remove any direct mapping to 'moderation_state'. That
+  // target is a computed virtual field managed by Content Moderation — this
+  // module owns the transition now and the direct mapping is redundant.
   $mappings = $feed_type->getMappings();
-  $has_mapping = FALSE;
+  $has_passthrough = FALSE;
+  $has_direct = FALSE;
+
   foreach ($mappings as $mapping) {
-    if (($mapping['target'] ?? '') === 'feeds_moderation_state_status') {
-      $has_mapping = TRUE;
-      break;
+    $target = $mapping['target'] ?? '';
+    if ($target === 'feeds_moderation_state_status') {
+      $has_passthrough = TRUE;
+    }
+    if ($target === 'moderation_state') {
+      $has_direct = TRUE;
     }
   }
-  if ($enabled && !$has_mapping) {
-    $feed_type->addMapping([
-      'target' => 'feeds_moderation_state_status',
-      'map' => ['value' => 'status'],
-      'settings' => [],
-      'unique' => [],
-    ]);
+
+  if ($enabled) {
+    // Strip any direct moderation_state mapping — this module owns that now.
+    if ($has_direct) {
+      $mappings = array_values(array_filter($mappings, static function (array $m): bool {
+        return ($m['target'] ?? '') !== 'moderation_state';
+      }));
+      $feed_type->setMappings($mappings);
+      \Drupal::messenger()->addStatus(t(
+        'The direct <em>moderation_state</em> mapping has been removed from this feed type. ' .
+        'Moderation state transitions are now managed by the Feeds Moderation State settings above.'
+      ));
+    }
+
+    // Inject the passthrough mapping so status-only source changes are hashed.
+    if (!$has_passthrough) {
+      $feed_type->addMapping([
+        'target' => 'feeds_moderation_state_status',
+        'map' => ['value' => 'status'],
+        'settings' => [],
+        'unique' => [],
+      ]);
+    }
   }
-  elseif (!$enabled && $has_mapping) {
+  elseif (!$enabled && $has_passthrough) {
+    // Module disabled on this feed type — remove the passthrough mapping.
     $mappings = array_values(array_filter($mappings, static function (array $m): bool {
       return ($m['target'] ?? '') !== 'feeds_moderation_state_status';
     }));

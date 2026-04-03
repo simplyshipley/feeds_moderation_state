@@ -10,63 +10,19 @@ declare(strict_types=1);
 use Drupal\Core\StringTranslation\TranslatableMarkup;
 
 /**
- * Implements hook_install().
- *
- * Removes any direct mappings to the 'moderation_state' target on all
- * FeedType config entities. Direct mappings to moderation_state are not
- * the correct approach — this module handles state transitions internally
- * via PROCESS_ENTITY_PRESAVE. See README.md for the correct configuration.
- */
-function feeds_moderation_state_install(): void {
-  _feeds_moderation_state_remove_direct_mappings();
-}
-
-/**
  * Remove direct moderation_state field mappings from all FeedType entities.
  *
- * Sites that were previously mapping a source field directly to the
- * moderation_state target must switch to the feeds_moderation_state module
- * configuration UI. This update removes the direct mappings and logs which
- * feed types were affected so administrators know which ones to reconfigure.
+ * Going forward, direct moderation_state mappings are removed automatically
+ * when an administrator enables this module on a feed type and saves the
+ * feed type configuration form. This update hook handles existing feed types
+ * that already have the module enabled but were saved before that automatic
+ * cleanup was added.
+ *
+ * Feed types that do NOT have this module enabled are left untouched.
  */
 function feeds_moderation_state_update_10001(): TranslatableMarkup|string {
-  $affected = _feeds_moderation_state_remove_direct_mappings();
-
-  if (empty($affected)) {
-    return 'No feed types had direct moderation_state mappings. Nothing to update.';
-  }
-
-  return t(
-    'Removed direct moderation_state mappings from @count feed type(s): @names. ' .
-    'Visit Structure > Feed types and configure the "Content moderation state" ' .
-    'settings on each affected feed type to restore moderation state management.',
-    [
-      '@count' => count($affected),
-      '@names' => implode(', ', $affected),
-    ]
-  );
-}
-
-/**
- * Scans all FeedType config entities for direct moderation_state mappings.
- *
- * For each FeedType found:
- *  - Removes any mapping whose target is 'moderation_state'.
- *  - Ensures the passthrough 'feeds_moderation_state_status' mapping is
- *    present so that status-only source changes are included in the Feeds
- *    item hash (required for the event subscriber to fire on status changes).
- *  - Saves the FeedType and logs a warning.
- *
- * Does NOT automatically enable or configure the module on the affected feed
- * types — the target moderation state is site-specific and must be set by an
- * administrator via the feed type configuration form.
- *
- * @return string[]
- *   Machine names of feed types that were modified.
- */
-function _feeds_moderation_state_remove_direct_mappings(): array {
   if (!\Drupal::moduleHandler()->moduleExists('feeds')) {
-    return [];
+    return 'Feeds module not installed. Nothing to update.';
   }
 
   /** @var \Drupal\Core\Entity\EntityStorageInterface $storage */
@@ -78,17 +34,19 @@ function _feeds_moderation_state_remove_direct_mappings(): array {
   $affected = [];
 
   foreach ($feed_types as $id => $feed_type) {
+    // Only touch feed types where this module is enabled.
+    $settings = $feed_type->getThirdPartySettings('feeds_moderation_state');
+    if (empty($settings['enabled'])) {
+      continue;
+    }
+
     $mappings = $feed_type->getMappings();
     $has_direct = FALSE;
-    $has_passthrough = FALSE;
 
     foreach ($mappings as $mapping) {
-      $target = $mapping['target'] ?? '';
-      if ($target === 'moderation_state') {
+      if (($mapping['target'] ?? '') === 'moderation_state') {
         $has_direct = TRUE;
-      }
-      if ($target === 'feeds_moderation_state_status') {
-        $has_passthrough = TRUE;
+        break;
       }
     }
 
@@ -96,48 +54,29 @@ function _feeds_moderation_state_remove_direct_mappings(): array {
       continue;
     }
 
-    // Remove the direct moderation_state mapping.
     $mappings = array_values(array_filter($mappings, static function (array $m): bool {
       return ($m['target'] ?? '') !== 'moderation_state';
     }));
-
-    // Ensure the passthrough target is present for hash tracking.
-    if (!$has_passthrough) {
-      $mappings[] = [
-        'target' => 'feeds_moderation_state_status',
-        'map' => ['value' => 'status'],
-        'settings' => [],
-        'unique' => [],
-      ];
-    }
-
     $feed_type->setMappings($mappings);
     $feed_type->save();
 
     $affected[] = $id;
 
-    \Drupal::logger('feeds_moderation_state')->warning(
-      'Removed direct moderation_state mapping from feed type "@id". ' .
-      'Configure the "Content moderation state" settings on this feed type ' .
-      'at /admin/structure/feeds/manage/@id/mapping to restore moderation ' .
-      'state management.',
+    \Drupal::logger('feeds_moderation_state')->notice(
+      'update_10001: removed direct moderation_state mapping from feed type "@id".',
       ['@id' => $id]
     );
   }
 
-  if (!empty($affected)) {
-    \Drupal::messenger()->addWarning(t(
-      'Feeds Moderation State: removed direct moderation_state mappings from ' .
-      '@count feed type(s): @names. Visit <a href=":url">Structure &gt; Feed types</a> ' .
-      'and enable the "Content moderation state" settings on each affected feed ' .
-      'type to restore moderation state management.',
-      [
-        '@count' => count($affected),
-        '@names' => implode(', ', $affected),
-        ':url' => '/admin/structure/feeds',
-      ]
-    ));
+  if (empty($affected)) {
+    return 'No feed types had direct moderation_state mappings. Nothing to update.';
   }
 
-  return $affected;
+  return t(
+    'Removed direct moderation_state mappings from @count feed type(s): @names.',
+    [
+      '@count' => count($affected),
+      '@names' => implode(', ', $affected),
+    ]
+  );
 }

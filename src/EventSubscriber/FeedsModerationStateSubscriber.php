@@ -19,12 +19,11 @@ use Symfony\Component\EventDispatcher\EventSubscriberInterface;
 /**
  * Sets a configured content moderation state on entities imported via Feeds.
  *
- * Subscribes to PROCESS_ENTITY_PRESAVE so the moderation state is applied
- * before Feeds saves the entity. Only acts on existing entities being updated
- * — new entities are skipped so that initial-import defaults are not
- * overridden. Supports bidirectional sync: transitions entities to an
- * unpublished state when the source signals unpublished, and to a published
- * state when the source signals published.
+ * @deprecated in feeds_moderation_state 1.x and removed in 2.x. Use
+ *   \Drupal\feeds_moderation_state\Feeds\Target\ModerationStateTarget instead.
+ *   The subscriber is no longer registered as a service. Moderation state is
+ *   now applied directly by the feeds_moderation_state_value target plugin
+ *   during the Feeds mapping phase.
  */
 class FeedsModerationStateSubscriber implements EventSubscriberInterface {
 

@@ -1,12 +1,4 @@
 services:
-  feeds_moderation_state.subscriber:
-    class: Drupal\feeds_moderation_state\EventSubscriber\FeedsModerationStateSubscriber
-    arguments:
-      - '@content_moderation.moderation_information'
-      - '@logger.channel.feeds_moderation_state'
-    tags:
-      - { name: event_subscriber }
-
   logger.channel.feeds_moderation_state:
     parent: logger.channel_base
     arguments: ['feeds_moderation_state']
